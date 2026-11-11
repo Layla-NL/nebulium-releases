@@ -181,16 +181,26 @@ else
     # (the list is three lines: "version X", "linux-x64 HASH", "linux-arm64 HASH"); the bundle itself from our
     # download host, and from GitHub when that cannot be reached. The hash is never taken from where the bundle is.
     command -v curl >/dev/null 2>&1 || die "curl is needed to download the bundle"
-    LIST="$(curl -fsL --retry 2 --connect-timeout 15 "$RELEASE_LIST" 2>/dev/null || curl -fsL --retry 2 --connect-timeout 15 "$RELEASE_LIST_FALLBACK" 2>/dev/null || true)"
-    LATEST="$(awk '$1 == "version" { print $2 }' <<<"$LIST" | head -n 1)"
-    SHA256="$(awk -v target="linux-$ARCH" '$1 == target { print $2 }' <<<"$LIST" | head -n 1)"
-    [[ "$LATEST" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && [[ "$SHA256" =~ ^[0-9a-f]{64}$ ]] \
-      || die "could not read the current release from $RELEASE_LIST; download a bundle yourself and pass --bundle FILE"
+    # An address that answers is not yet an address that has the thing (a site can answer every path with a page):
+    # a list counts when it reads as one, a bundle when it hashes to what the list says. Otherwise the next source.
+    read_list() {
+      local list
+      list="$(curl -fsL --retry 2 --connect-timeout 15 "$1" 2>/dev/null)" || return 1
+      LATEST="$(awk '$1 == "version" { print $2 }' <<<"$list" | head -n 1)"
+      SHA256="$(awk -v target="linux-$ARCH" '$1 == target { print $2 }' <<<"$list" | head -n 1)"
+      [[ "$LATEST" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && [[ "$SHA256" =~ ^[0-9a-f]{64}$ ]]
+    }
+    fetch_bundle() {
+      curl -fL --retry 2 --connect-timeout 20 -o "$WORK/bundle.tar.gz" "$1" || return 1
+      echo "$SHA256  $WORK/bundle.tar.gz" | sha256sum -c - >/dev/null 2>&1
+    }
+    read_list "$RELEASE_LIST" || read_list "$RELEASE_LIST_FALLBACK" \
+      || die "could not read the current release from $RELEASE_LIST or $RELEASE_LIST_FALLBACK; download a bundle yourself and pass --bundle FILE"
     FILE="nebulium-runtime-$LATEST-linux-$ARCH.tar.gz"
     say "downloading Nebulium $LATEST"
-    curl -fL --retry 2 --connect-timeout 20 -o "$WORK/bundle.tar.gz" "$DOWNLOAD_BASE/$LATEST/$FILE" \
-      || { say "the main download address did not answer; trying GitHub"; curl -fL --retry 2 --connect-timeout 20 -o "$WORK/bundle.tar.gz" "$DOWNLOAD_FALLBACK/v$LATEST/$FILE"; } \
-      || die "the bundle could not be downloaded; download it yourself and pass --bundle FILE"
+    fetch_bundle "$DOWNLOAD_BASE/$LATEST/$FILE" \
+      || { say "the main download address did not have it; trying GitHub"; fetch_bundle "$DOWNLOAD_FALLBACK/v$LATEST/$FILE"; } \
+      || die "the bundle could not be downloaded, or is not the one the release list names; download it yourself and pass --bundle FILE"
   elif [[ "$BUNDLE" =~ ^https:// ]]; then
     command -v curl >/dev/null 2>&1 || die "curl is needed to download the bundle"
     say "downloading $BUNDLE"
