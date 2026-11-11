@@ -355,6 +355,7 @@ WorkingDirectory=$PREFIX/app
 Environment=HOME=$DATA/home
 Environment=PATH=$PREFIX/node/bin:/usr/local/bin:/usr/bin:/bin
 Environment=OMB_BOT_BOX=$SANDBOX
+Environment="OMB_CLI_PREFIX=sudo $PREFIX/cli"
 Environment=OMB_DISABLE_MODEL_CATALOG_FETCH=1
 Environment=OMB_COMPOSIO_BROKER=off
 Environment=OMB_WEBHOOK_PORT=$WEBHOOK_PORT
@@ -400,12 +401,20 @@ if [ "$SANDBOX" -eq 1 ]; then
   if [ "$BOX" -eq 1 ]; then say "sandbox: on"; else echo "install.sh: WARNING: the sandbox did not come up; bots would run as the home's own user. See: journalctl -u $UNIT" >&2; fi
 fi
 
+# The home's own command line, as the home's own user; what the home prints as "run this" names it.
+cat > "$PREFIX/cli" <<CLICMD
+#!/bin/sh
+case "\${1:-}" in
+  pair) shift; exec runuser -u $NAME -- env HOME=$DATA/home OMB_CLI_PREFIX="sudo $PREFIX/cli" $PREFIX/node/bin/node $PREFIX/app/cli.js pair --port $PORT --data-dir $DATA/data "\$@" ;;
+  *) echo "usage: sudo $PREFIX/cli pair [--phone] [--label NAME] [--ttl 24h]" >&2; exit 2 ;;
+esac
+CLICMD
 cat > "$PREFIX/pair" <<PAIRCMD
 #!/bin/sh
 # Prints a new pairing code for the Nebulium app.
-exec runuser -u $NAME -- env HOME=$DATA/home $PREFIX/node/bin/node $PREFIX/app/cli.js pair --port $PORT --data-dir $DATA/data "\$@"
+exec $PREFIX/cli pair "\$@"
 PAIRCMD
-chmod 755 "$PREFIX/pair"
+chmod 755 "$PREFIX/cli" "$PREFIX/pair"
 # The new version runs: the installation stands, and the copy kept for a failed start is no longer needed.
 SWAPPED=0
 rm -rf "$PREFIX/app.prev" "$PREFIX/node.prev" "$PREFIX/VERSION.prev" "$PREFIX/unit.prev" "$PREFIX/manifest.prev"
